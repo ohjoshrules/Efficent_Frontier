@@ -348,20 +348,20 @@ def ensure_newest_first(prices_df: pd.DataFrame, date_col: str, logger=None) -> 
 
         if order == 'oldest_first':
             if logger:
-                logger.warning("  ⚠️  Data is sorted OLDEST FIRST - reversing to NEWEST FIRST")
+                logger.warning("  WARNING:  Data is sorted OLDEST FIRST - reversing to NEWEST FIRST")
             # Reverse the dataframe to make it newest first
             prices_df = prices_df.iloc[::-1].reset_index(drop=True)
             if logger:
                 logger.info(f"  Data reordered: {prices_df[date_col].iloc[0]} (newest) to {prices_df[date_col].iloc[-1]} (oldest)")
         else:
             if logger:
-                logger.info(f"  ✓ Data is correctly sorted NEWEST FIRST")
+                logger.info(f"  [OK] Data is correctly sorted NEWEST FIRST")
                 logger.info(f"    First date: {dates.iloc[0]} (newest)")
                 logger.info(f"    Last date:  {dates.iloc[-1]} (oldest)")
 
     except ValueError as e:
         if logger:
-            logger.error(f"  ⚠️  Could not determine date order: {e}")
+            logger.error(f"  WARNING:  Could not determine date order: {e}")
             logger.warning("  Assuming data is sorted correctly (newest first)")
 
     return prices_df
@@ -546,8 +546,11 @@ def create_ln_returns_sheet(wb: Workbook, ln_returns: pd.DataFrame, date_col: st
 
     ws.cell(row=cov_header_row, column=1, value="COVARIANCE MATRIX").font = section_font
 
-    # Compute covariance matrix (population)
-    cov_matrix = returns_only.cov() * (len(returns_only) - 1) / len(returns_only)
+    # Compute covariance matrix (population) in DECIMAL form
+    # Returns are in percentage form (e.g., 3.47 = 3.47%), so divide by 100 first
+    # Covariance of decimals = Covariance of percentages / 10000 (since cov scales with square of factor)
+    returns_decimal = returns_only / 100  # Convert to decimal form (0.0347 = 3.47%)
+    cov_matrix = returns_decimal.cov() * (len(returns_decimal) - 1) / len(returns_decimal)
 
     # Column headers for covariance matrix
     cov_col_header_row = cov_header_row + 1
@@ -1065,17 +1068,17 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info("  │  HOW TO USE:                                                                    │")
         logger.info("  │    1. Data tab → Data Analysis → Descriptive Statistics                         │")
         logger.info(f"  │    2. Input Range: B3:AF{n_obs + 2} (all returns data)                          │")
-        logger.info("  │    3. ☑ Labels in first row (if you include row 2 with tickers)                 │")
-        logger.info("  │    4. ☑ Summary statistics                                                      │")
+        logger.info("  │    3. [x] Labels in first row (if you include row 2 with tickers)                 │")
+        logger.info("  │    4. [x] Summary statistics                                                      │")
         logger.info("  │    5. Output Range: Select where you want results                               │")
         logger.info("  │    6. Click OK                                                                  │")
         logger.info("  │                                                                                 │")
         logger.info("  │  OUTPUT INCLUDES:                                                               │")
         logger.info("  │    • Mean (same as AVERAGE formula)                                             │")
-        logger.info("  │    • Standard Deviation (⚠️ uses N-1, sample std)                               │")
+        logger.info("  │    • Standard Deviation (WARNING: uses N-1, sample std)                               │")
         logger.info("  │    • Variance, Min, Max, Sum, Count, etc.                                       │")
         logger.info("  │                                                                                 │")
-        logger.info("  │  ⚠️  IMPORTANT: Data Analysis gives SAMPLE std dev (divides by N-1)             │")
+        logger.info("  │  WARNING:  IMPORTANT: Data Analysis gives SAMPLE std dev (divides by N-1)             │")
         logger.info(f"  │     To convert to POPULATION std dev: multiply by √((N-1)/N) = √({n_obs-1}/{n_obs})      │")
         logger.info(f"  │     Or: =StdDev_Sample × SQRT({n_obs-1}/{n_obs})                                        │")
         logger.info("  │                                                                                 │")
@@ -1096,7 +1099,7 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         # Verify a sample calculation with actual values
         manual_mean = returns_only[sample_ticker].sum() / n_obs
         manual_std = np.sqrt(((returns_only[sample_ticker] - manual_mean) ** 2).sum() / n_obs)
-        logger.info(f"  ✓ VERIFICATION for {sample_ticker}:")
+        logger.info(f"  [OK] VERIFICATION for {sample_ticker}:")
         logger.info(f"    Sum of all {n_obs} returns: {returns_only[sample_ticker].sum():.7f}")
         logger.info(f"    Manual Mean:  {returns_only[sample_ticker].sum():.7f} / {n_obs} = {manual_mean:.7f}%")
         logger.info(f"    Computed Mean:                 {means[sample_ticker]:.7f}%")
@@ -1108,8 +1111,11 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
 
         log_dataframe(logger, stats_df.T, "STATISTICS TABLE")
 
-        # Compute covariance matrix (population)
-        cov_matrix = returns_only.cov() * (n_obs - 1) / n_obs
+        # Compute covariance matrix (population) in DECIMAL form
+        # Returns are in percentage form (e.g., 3.47 = 3.47%), so divide by 100 first
+        # Covariance of decimals = Covariance of percentages / 10000 (since cov scales with square of factor)
+        returns_decimal = returns_only / 100  # Convert to decimal form (0.0347 = 3.47%)
+        cov_matrix = returns_decimal.cov() * (n_obs - 1) / n_obs
 
         # =====================================================================
         # LOG COVARIANCE MATRIX WITH EXCEL INSTRUCTIONS AND VERIFICATION
@@ -1147,7 +1153,7 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info("  │  HOW TO USE:                                                                    │")
         logger.info("  │    1. Data tab → Data Analysis → Covariance                                     │")
         logger.info(f"  │    2. Input Range: B3:AF{n_obs + 2} (all returns data)                          │")
-        logger.info("  │    3. ☑ Labels in first row (if you include row 2 with tickers)                 │")
+        logger.info("  │    3. [x] Labels in first row (if you include row 2 with tickers)                 │")
         logger.info("  │    4. Output Range: Select destination cell for top-left of matrix              │")
         logger.info("  │    5. Click OK                                                                  │")
         logger.info("  │                                                                                 │")
@@ -1157,7 +1163,7 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info("  │    • Off-diagonal = Covariance between pairs of assets                          │")
         logger.info("  │    • Lower triangle filled (upper triangle blank - it's symmetric)              │")
         logger.info("  │                                                                                 │")
-        logger.info("  │  ⚠️  IMPORTANT: Data Analysis uses SAMPLE covariance (divides by N-1)           │")
+        logger.info("  │  WARNING:  IMPORTANT: Data Analysis uses SAMPLE covariance (divides by N-1)           │")
         logger.info(f"  │     To convert to POPULATION covariance: multiply each cell by (N-1)/N         │")
         logger.info(f"  │     = ({n_obs-1}/{n_obs}) = {(n_obs-1)/n_obs:.7f}                                              │")
         logger.info("  │                                                                                 │")
@@ -1273,15 +1279,23 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
         logger.info("")
         logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐")
-        logger.info("  │  EXCEL FORMULA FOR MATRIX MULTIPLICATION:                                                           │")
+        logger.info("  │  EXCEL FORMULA FOR MATRIX MULTIPLICATION (DECIMAL COVARIANCE):                                      │")
         logger.info("  │                                                                                                     │")
-        logger.info(f"  │  =MMULT(TRANSPOSE(B103:AF{102+n_obs}), B103:AF{102+n_obs}) / {n_obs}                                                 │")
+        logger.info(f"  │  =MMULT(TRANSPOSE(B103:AF{102+n_obs}), B103:AF{102+n_obs}) / {n_obs} / 10000                                        │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │  WARNING:  IMPORTANT: Returns are in PERCENTAGE form (e.g., 3.47 = 3.47%)                                 │")
+        logger.info("  │     Covariance should be in DECIMAL form for portfolio optimization!                                │")
+        logger.info("  │     Divide by 10000 (= 100²) to convert from %² to decimal²                                         │")
         logger.info("  │                                                                                                     │")
         logger.info("  │  Breaking it down:                                                                                  │")
         logger.info(f"  │    • TRANSPOSE(B103:AF{102+n_obs}) = the transposed demeaned matrix ({len(tickers)}×{n_obs})                        │")
         logger.info(f"  │    • B103:AF{102+n_obs} = the original demeaned matrix ({n_obs}×{len(tickers)})                                      │")
         logger.info(f"  │    • MMULT multiplies them: ({len(tickers)}×{n_obs}) × ({n_obs}×{len(tickers)}) = ({len(tickers)}×{len(tickers)})                                      │")
-        logger.info(f"  │    • Divide by {n_obs} to get population covariance                                                         │")
+        logger.info(f"  │    • Divide by {n_obs} for population covariance (in %²)                                                   │")
+        logger.info("  │    • Divide by 10000 to convert to decimal covariance                                               │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │  ALTERNATIVE (if you want returns in decimal form first):                                           │")
+        logger.info(f"  │  =MMULT(TRANSPOSE(B103:AF{102+n_obs}/100), B103:AF{102+n_obs}/100) / {n_obs}                                        │")
         logger.info("  │                                                                                                     │")
         logger.info("  │  Select a {0}×{0} range, type the formula, press Ctrl+Shift+Enter (or Enter in Excel 365)          │".format(len(tickers)))
         logger.info("  └─────────────────────────────────────────────────────────────────────────────────────────────────────┘")
@@ -1324,7 +1338,7 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info(f"")
         logger.info(f"    = (1/{n_obs}) × {sum_d1_d1:>12.4f}")
         logger.info(f"")
-        logger.info(f"    = {sum_d1_d1/n_obs:>12.7f}  ← This equals σ²({t1}) = ({stds[t1]:.7f})² = {stds[t1]**2:.7f} ✓")
+        logger.info(f"    = {sum_d1_d1/n_obs:>12.7f}  ← This equals σ²({t1}) = ({stds[t1]:.7f})² = {stds[t1]**2:.7f} [OK]")
         logger.info("")
         logger.info(f"  ═══════════════════════════════════════════════════════════════════════════════════════════════════")
         logger.info(f"  Cov({t1},{t2}) = (1/{n_obs}) × [{t1} row] • [{t2} column]")
@@ -1344,7 +1358,7 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info(f"")
         logger.info(f"    = (1/{n_obs}) × {sum_d2_d2:>12.4f}")
         logger.info(f"")
-        logger.info(f"    = {sum_d2_d2/n_obs:>12.7f}  ← This equals σ²({t2}) = ({stds[t2]:.7f})² = {stds[t2]**2:.7f} ✓")
+        logger.info(f"    = {sum_d2_d2/n_obs:>12.7f}  ← This equals σ²({t2}) = ({stds[t2]:.7f})² = {stds[t2]**2:.7f} [OK]")
         logger.info("")
 
         logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
@@ -1385,9 +1399,11 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info(f"                                        SIZE: {len(tickers)} × {len(tickers)}")
         logger.info("")
         logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐")
-        logger.info("  │  COMPLETE EXCEL FORMULA (copy this exactly):                                                        │")
+        logger.info("  │  COMPLETE EXCEL FORMULA FOR DECIMAL COVARIANCE (copy this exactly):                                 │")
         logger.info("  │                                                                                                     │")
-        logger.info(f"  │  =MMULT(TRANSPOSE(B103:AF{102+n_obs}), B103:AF{102+n_obs}) / {n_obs}                                                 │")
+        logger.info(f"  │  =MMULT(TRANSPOSE(B103:AF{102+n_obs}), B103:AF{102+n_obs}) / {n_obs} / 10000                                        │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │  WARNING:  The /10000 converts from percentage² to decimal² (since 100² = 10000)                          │")
         logger.info("  │                                                                                                     │")
         logger.info(f"  │  1. Select a {len(tickers)}×{len(tickers)} range (e.g., B180:AF210) for the output                                         │")
         logger.info("  │  2. Type the formula above                                                                          │")
@@ -1399,40 +1415,221 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info("  ╚═════════════════════════════════════════════════════════════════════════════════╝")
         logger.info("")
 
-        # Verify covariance calculation manually
-        manual_cov = np.sum((r1 - m1) * (r2 - m2)) / n_obs
+        # Verify covariance calculation manually (convert to decimal form)
+        # Returns are in % form, so demeaned products are in %² form
+        # Divide by 10000 to convert to decimal form
+        manual_cov_pct = np.sum((r1 - m1) * (r2 - m2)) / n_obs  # In %² form
+        manual_cov = manual_cov_pct / 10000  # Convert to decimal form
         computed_cov = cov_matrix.loc[t1, t2]
 
-        logger.info(f"  ✓ VERIFICATION - Covariance({t1}, {t2}):")
-        logger.info(f"    Formula: Σ[(r_{t1} - μ_{t1})(r_{t2} - μ_{t2})] / N")
+        # Calculate decimal demeaned values for display
+        first_r1_dec = first_r1 / 100  # Convert to decimal (0.0347 = 3.47%)
+        first_r2_dec = first_r2 / 100
+        m1_dec = m1 / 100
+        m2_dec = m2 / 100
+        first_demeaned_r1_dec = first_r1_dec - m1_dec
+        first_demeaned_r2_dec = first_r2_dec - m2_dec
+
+        logger.info(f"  [OK] VERIFICATION - Covariance({t1}, {t2}):")
+        logger.info(f"    Formula: Σ[(r_{t1} - μ_{t1})(r_{t2} - μ_{t2})] / N  (using decimal returns)")
         logger.info(f"    ")
         logger.info(f"    ┌───────────────────────────────────────────────────────────────────────┐")
-        logger.info(f"    │  Step-by-step calculation for first observation:                     │")
+        logger.info(f"    │  Step-by-step calculation for first observation (in DECIMAL form):   │")
         logger.info(f"    ├───────────────────────────────────────────────────────────────────────┤")
-        logger.info(f"    │  {t1} return (B3):    {first_r1:>12.7f}                                │")
-        logger.info(f"    │  {t1} mean (B64):     {m1:>12.7f}                                │")
-        logger.info(f"    │  {t1} demeaned:       {first_r1:>12.7f} - {m1:.7f} = {first_demeaned_r1:>12.7f}  │")
+        logger.info(f"    │  {t1} return (B3):    {first_r1_dec:>12.7f} (= {first_r1:.4f}% / 100)          │")
+        logger.info(f"    │  {t1} mean (B64):     {m1_dec:>12.7f} (= {m1:.4f}% / 100)           │")
+        logger.info(f"    │  {t1} demeaned:       {first_r1_dec:.7f} - {m1_dec:.7f} = {first_demeaned_r1_dec:>12.7f}  │")
         logger.info(f"    │                                                                       │")
-        logger.info(f"    │  {t2} return (C3):   {first_r2:>12.7f}                                │")
-        logger.info(f"    │  {t2} mean (C64):    {m2:>12.7f}                                │")
-        logger.info(f"    │  {t2} demeaned:      {first_r2:>12.7f} - {m2:.7f} = {first_demeaned_r2:>12.7f}  │")
+        logger.info(f"    │  {t2} return (C3):   {first_r2_dec:>12.7f} (= {first_r2:.4f}% / 100)          │")
+        logger.info(f"    │  {t2} mean (C64):    {m2_dec:>12.7f} (= {m2:.4f}% / 100)           │")
+        logger.info(f"    │  {t2} demeaned:      {first_r2_dec:.7f} - {m2_dec:.7f} = {first_demeaned_r2_dec:>12.7f}  │")
         logger.info(f"    │                                                                       │")
-        logger.info(f"    │  Product: {first_demeaned_r1:.7f} × {first_demeaned_r2:.7f} = {first_demeaned_r1 * first_demeaned_r2:>12.7f}       │")
+        logger.info(f"    │  Product: {first_demeaned_r1_dec:.7f} × {first_demeaned_r2_dec:.7f} = {first_demeaned_r1_dec * first_demeaned_r2_dec:>12.9f}  │")
         logger.info(f"    └───────────────────────────────────────────────────────────────────────┘")
         logger.info(f"    ")
-        logger.info(f"    Sum of all {n_obs} products: {np.sum((r1 - m1) * (r2 - m2)):.7f}")
-        logger.info(f"    Divide by N: {np.sum((r1 - m1) * (r2 - m2)):.7f} / {n_obs} = {manual_cov:.7f}")
-        logger.info(f"    Matrix value:        {computed_cov:.7f}")
+        logger.info(f"    Sum of all {n_obs} products (decimal): {np.sum((r1/100 - m1/100) * (r2/100 - m2/100)):.9f}")
+        logger.info(f"    Divide by N: {np.sum((r1/100 - m1/100) * (r2/100 - m2/100)):.9f} / {n_obs} = {manual_cov:.9f}")
+        logger.info(f"    Matrix value:                     {computed_cov:.9f}")
         logger.info(f"    Match: {np.isclose(manual_cov, computed_cov)}")
         logger.info("")
 
-        # Verify variance (diagonal) = std^2
-        manual_var = stds[t1] ** 2
+        # Verify variance (diagonal) = std^2 (in decimal form)
+        # Std is in % form (5.19 = 5.19%), convert to decimal (0.0519) then square
+        std_decimal = stds[t1] / 100  # Convert % to decimal
+        manual_var = std_decimal ** 2  # Variance in decimal form
         matrix_var = cov_matrix.loc[t1, t1]
-        logger.info(f"  ✓ VERIFICATION - Variance({t1}) = Std²:")
-        logger.info(f"    Std({t1})² = {stds[t1]:.7f}² = {manual_var:.7f}")
-        logger.info(f"    Cov({t1},{t1}) from matrix:    {matrix_var:.7f}")
+        logger.info(f"  [OK] VERIFICATION - Variance({t1}) = Std² (in decimal form):")
+        logger.info(f"    Std({t1}) = {stds[t1]:.7f}% = {std_decimal:.9f} (decimal)")
+        logger.info(f"    Std({t1})² = {std_decimal:.9f}² = {manual_var:.9f}")
+        logger.info(f"    Cov({t1},{t1}) from matrix:        {matrix_var:.9f}")
         logger.info(f"    Match: {np.isclose(manual_var, matrix_var)}")
+        logger.info("")
+
+        # =====================================================================
+        # EXCEL TABLE EXPLANATION
+        # =====================================================================
+        logger.info("")
+        logger.info("  ╔═════════════════════════════════════════════════════════════════════════════════════════════════════╗")
+        logger.info("  ║                    ALTERNATIVE: Using Excel Tables for LN Returns                                   ║")
+        logger.info("  ╚═════════════════════════════════════════════════════════════════════════════════════════════════════╝")
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  WHAT IS AN EXCEL TABLE?                                                                            │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │  An Excel Table is a structured data range with:                                                    │")
+        logger.info("  │    • Named columns that can be referenced by name instead of cell addresses                        │")
+        logger.info("  │    • Automatic expansion when you add new data                                                      │")
+        logger.info("  │    • Structured references that are more readable than A1-style references                         │")
+        logger.info("  │    • Built-in filtering and sorting capabilities                                                    │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+        logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        logger.info("  ┃  HOW TO CREATE A TABLE FROM LN RETURNS DATA                                                         ┃")
+        logger.info("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  STEP-BY-STEP:                                                                                      │")
+        logger.info("  │                                                                                                     │")
+        logger.info(f"  │    1. Select your LN Returns data INCLUDING headers: A2:AF{2+n_obs}                                      │")
+        logger.info("  │       (Row 2 has ticker names: Date, SPY, AAPL, AMGN, ... WMT)                                      │")
+        logger.info(f"  │       (Rows 3-{2+n_obs} have the date and return values)                                                    │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    2. Press Ctrl+T (or go to Insert tab → Table)                                                    │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    3. Check [x] 'My table has headers'                                                                │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    4. Click OK                                                                                      │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    5. RENAME THE TABLE (important!):                                                                │")
+        logger.info("  │       • Click anywhere in the table                                                                 │")
+        logger.info("  │       • Go to 'Table Design' tab (appears when table is selected)                                   │")
+        logger.info("  │       • In the 'Table Name' box (top left), change 'Table1' to 'LNReturns'                          │")
+        logger.info("  │       • Press Enter                                                                                 │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+        logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        logger.info("  ┃  STRUCTURED REFERENCE SYNTAX                                                                        ┃")
+        logger.info("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  BASIC SYNTAX:                                                                                      │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    TableName[ColumnName]     → References entire column (excluding header)                          │")
+        logger.info("  │    TableName[[#Headers]]     → References only the header row                                       │")
+        logger.info("  │    TableName[[#All]]         → References entire table including headers                            │")
+        logger.info("  │    TableName[[#Data]]        → References only the data (no headers)                                │")
+        logger.info("  │    TableName[@ColumnName]    → References the current row's value in that column                    │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │  EXAMPLES with our 'LNReturns' table:                                                               │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    LNReturns[SPY]            → All SPY returns (B3:B74 equivalent)                                  │")
+        logger.info("  │    LNReturns[AAPL]           → All AAPL returns (C3:C74 equivalent)                                 │")
+        logger.info("  │    LNReturns[Date]           → All dates (A3:A74 equivalent)                                        │")
+        logger.info("  │    LNReturns[@SPY]           → Current row's SPY value (use in calculated columns)                  │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+        logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        logger.info("  ┃  FORMULAS COMPARISON: Cell References vs Table References                                           ┃")
+        logger.info("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        logger.info("")
+        logger.info("  ┌──────────────────────────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  CALCULATING MEAN:                                                                                   │")
+        logger.info("  │                                                                                                      │")
+        logger.info("  │    Cell Reference:     =AVERAGE(B3:B74)                                                              │")
+        logger.info("  │    Table Reference:    =AVERAGE(LNReturns[SPY])                                                      │")
+        logger.info("  │                                                                                                      │")
+        logger.info("  │  CALCULATING STANDARD DEVIATION:                                                                     │")
+        logger.info("  │                                                                                                      │")
+        logger.info("  │    Cell Reference:     =STDEV.P(B3:B74)                                                              │")
+        logger.info("  │    Table Reference:    =STDEV.P(LNReturns[SPY])                                                      │")
+        logger.info("  │                                                                                                      │")
+        logger.info("  │  CALCULATING COVARIANCE:                                                                             │")
+        logger.info("  │                                                                                                      │")
+        logger.info("  │    Cell Reference:     =COVARIANCE.P(B3:B74, C3:C74)                                                 │")
+        logger.info("  │    Table Reference:    =COVARIANCE.P(LNReturns[SPY], LNReturns[AAPL])                                │")
+        logger.info("  │                                                                                                      │")
+        logger.info("  │  CALCULATING CORRELATION:                                                                            │")
+        logger.info("  │                                                                                                      │")
+        logger.info("  │    Cell Reference:     =CORREL(B3:B74, C3:C74)                                                       │")
+        logger.info("  │    Table Reference:    =CORREL(LNReturns[SPY], LNReturns[AAPL])                                      │")
+        logger.info("  └──────────────────────────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+        logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        logger.info("  ┃  DEMEANING WITH TABLE REFERENCES                                                                    ┃")
+        logger.info("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  OPTION 1: Add a calculated column to the table                                                     │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    1. Click on the cell to the right of the last data column in the table                           │")
+        logger.info("  │    2. Type a header name: 'SPY_Demeaned'                                                             │")
+        logger.info("  │    3. In the first data row, enter:                                                                  │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │       =[@SPY] - AVERAGE(LNReturns[SPY])                                                              │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    4. The formula auto-fills for all rows!                                                           │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │  OPTION 2: Create a separate demeaned table (recommended for matrix math)                           │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    1. In a new location, create headers matching your tickers                                        │")
+        logger.info("  │    2. In the first cell under SPY header:                                                            │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │       =INDEX(LNReturns[SPY], ROW()-[first_data_row]+1) - AVERAGE(LNReturns[SPY])                     │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    3. Or simply reference the original cell minus mean:                                              │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │       =LNReturns[@SPY] - AVERAGE(LNReturns[SPY])     (if in same row context)                        │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+        logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        logger.info("  ┃  MATRIX MULTIPLICATION WITH TABLE REFERENCES                                                        ┃")
+        logger.info("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  WARNING:  LIMITATION: MMULT does not work directly with structured table references                      │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │  For MMULT, you still need to use cell ranges. However, you can:                                    │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    1. Use INDIRECT to convert table references to ranges:                                           │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │       =MMULT(TRANSPOSE(INDIRECT(\"DemeanedTable\")), INDIRECT(\"DemeanedTable\")) / ROWS(LNReturns)    │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    2. Or simply reference the table's underlying range:                                              │")
+        logger.info("  │                                                                                                     │")
+        logger.info(f"  │       =MMULT(TRANSPOSE(B103:AF{102+n_obs}), B103:AF{102+n_obs}) / ROWS(LNReturns[SPY])                              │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │       Using ROWS(LNReturns[SPY]) instead of 72 makes it dynamic!                                    │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+        logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        logger.info("  ┃  ADVANTAGES OF USING EXCEL TABLES                                                                   ┃")
+        logger.info("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  [OK] READABILITY: =AVERAGE(LNReturns[SPY]) is clearer than =AVERAGE(B3:B74)                           │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │  [OK] AUTOMATIC EXPANSION: Add new data rows and formulas update automatically                         │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │  [OK] LESS ERROR-PRONE: No need to remember row numbers or update ranges                               │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │  [OK] SELF-DOCUMENTING: Formula clearly shows which column is being used                               │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │  [OK] EASIER AUDITING: Table references make formulas easier to understand                             │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  QUICK REFERENCE - ALL FORMULAS WITH TABLE 'LNReturns':                                             │")
+        logger.info("  │                                                                                                     │")
+        logger.info("  │    Mean of SPY:           =AVERAGE(LNReturns[SPY])                                                  │")
+        logger.info("  │    Std Dev of SPY:        =STDEV.P(LNReturns[SPY])                                                  │")
+        logger.info("  │    Variance of SPY:       =VAR.P(LNReturns[SPY])                                                    │")
+        logger.info("  │    Cov(SPY, AAPL):        =COVARIANCE.P(LNReturns[SPY], LNReturns[AAPL])                            │")
+        logger.info("  │    Corr(SPY, AAPL):       =CORREL(LNReturns[SPY], LNReturns[AAPL])                                  │")
+        logger.info("  │    Count of observations: =ROWS(LNReturns[SPY])                                                     │")
+        logger.info("  │    Sum of SPY returns:    =SUM(LNReturns[SPY])                                                      │")
+        logger.info("  │    Min SPY return:        =MIN(LNReturns[SPY])                                                      │")
+        logger.info("  │    Max SPY return:        =MAX(LNReturns[SPY])                                                      │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────────────────────────┘")
         logger.info("")
 
         # Log covariance matrix with Excel references
@@ -1495,7 +1692,7 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info("  │  HOW TO USE:                                                                    │")
         logger.info("  │    1. Data tab → Data Analysis → Correlation                                    │")
         logger.info(f"  │    2. Input Range: B3:AF{n_obs + 2} (all returns data)                          │")
-        logger.info("  │    3. ☑ Labels in first row (if you include row 2 with tickers)                 │")
+        logger.info("  │    3. [x] Labels in first row (if you include row 2 with tickers)                 │")
         logger.info("  │    4. Output Range: Select destination cell for top-left of matrix              │")
         logger.info("  │    5. Click OK                                                                  │")
         logger.info("  │                                                                                 │")
@@ -1504,7 +1701,7 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info("  │    • Diagonal elements = 1.0 (asset correlated with itself)                     │")
         logger.info("  │    • Lower triangle filled (upper triangle blank - it's symmetric)              │")
         logger.info("  │                                                                                 │")
-        logger.info("  │  ✓ NOTE: Unlike covariance, correlation doesn't need N vs N-1 adjustment        │")
+        logger.info("  │  [OK] NOTE: Unlike covariance, correlation doesn't need N vs N-1 adjustment        │")
         logger.info("  │    The N or N-1 cancels out in the formula: Cov(X,Y) / (σₓ × σᵧ)               │")
         logger.info("  │                                                                                 │")
         logger.info("  │  CELL VALUES IN INPUT RANGE (returns %):                                        │")
@@ -1519,7 +1716,7 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         manual_corr = manual_cov / (stds[t1] * stds[t2])
         computed_corr = corr_matrix.loc[t1, t2]
 
-        logger.info(f"  ✓ VERIFICATION - Correlation({t1}, {t2}):")
+        logger.info(f"  [OK] VERIFICATION - Correlation({t1}, {t2}):")
         logger.info(f"    Formula: Cov({t1},{t2}) / (σ_{t1} × σ_{t2})")
         logger.info(f"    = {manual_cov:.7f} / ({stds[t1]:.7f} × {stds[t2]:.7f})")
         logger.info(f"    = {manual_cov:.7f} / {stds[t1] * stds[t2]:.7f}")
@@ -1530,7 +1727,7 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
 
         # Verify diagonal = 1
         diag_check = all(np.isclose(corr_matrix.loc[t, t], 1.0) for t in tickers)
-        logger.info(f"  ✓ VERIFICATION - All diagonal elements = 1.0: {diag_check}")
+        logger.info(f"  [OK] VERIFICATION - All diagonal elements = 1.0: {diag_check}")
         logger.info("")
 
         log_dataframe(logger, corr_matrix, "CORRELATION MATRIX VALUES")
@@ -1707,7 +1904,7 @@ def get_task_solution(task_num: str, task_text: str) -> List[str]:
             "Solver: Max → PFMean",
             "        Change → weights",
             "        Constraints: SUM(weights)=1, PFStD=5, weights>=0",
-            "  ⚠️ Add 'weights >= 0' explicitly, NOT the checkbox!",
+            "  WARNING: Add 'weights >= 0' explicitly, NOT the checkbox!",
             "",
             "@ 6% Std Dev (save in column AL):",
             "Solver: Max → PFMean",
@@ -1759,14 +1956,14 @@ def get_task_solution(task_num: str, task_text: str) -> List[str]:
         ],
         "15": [
             "Final formatting checklist:",
-            "☐ All graphs have titles",
-            "☐ All axes are labeled",
-            "☐ All data points are labeled",
-            "☐ Legend is clear and positioned well",
-            "☐ Important results highlighted with color",
-            "☐ Comments added to explain key formulas",
-            "☐ Consistent number formatting",
-            "☐ Borders and shading for organization"
+            "[ ] All graphs have titles",
+            "[ ] All axes are labeled",
+            "[ ] All data points are labeled",
+            "[ ] Legend is clear and positioned well",
+            "[ ] Important results highlighted with color",
+            "[ ] Comments added to explain key formulas",
+            "[ ] Consistent number formatting",
+            "[ ] Borders and shading for organization"
         ]
     }
 
@@ -1914,7 +2111,7 @@ def log_excel_instructions(logger: logging.Logger, n_returns: int, n_tickers: in
     logger.info("  ║  5. Output Range: Select destination                                            ║")
     logger.info("  ║  6. Click OK                                                                    ║")
     logger.info("  ║                                                                                 ║")
-    logger.info("  ║  ⚠️  NOTE: Data Analysis uses N-1 (sample).                                      ║")
+    logger.info("  ║  WARNING:  NOTE: Data Analysis uses N-1 (sample).                                      ║")
     logger.info("  ║     Multiply result by (N-1)/N to get population covariance.                    ║")
     logger.info("  ╚═════════════════════════════════════════════════════════════════════════════════╝")
     logger.info("")
@@ -2042,9 +2239,9 @@ def log_excel_instructions(logger: logging.Logger, n_returns: int, n_tickers: in
     logger.info("  ╠═════════════════════════════════════════════════════════════════════════════════╣")
     logger.info("  ║  1. Click on stock points series                                                ║")
     logger.info("  ║  2. Chart Design → Add Chart Element → Data Labels → More Options               ║")
-    logger.info("  ║  3. Check ☑ 'Value From Cells'                                                  ║")
+    logger.info("  ║  3. Check [x] 'Value From Cells'                                                  ║")
     logger.info("  ║  4. Select range with ticker names                                              ║")
-    logger.info("  ║  5. Uncheck ☐ 'Y Value'                                                         ║")
+    logger.info("  ║  5. Uncheck [ ] 'Y Value'                                                         ║")
     logger.info("  ║  6. Label Position: Right or Above                                              ║")
     logger.info("  ╚═════════════════════════════════════════════════════════════════════════════════╝")
     logger.info("")
@@ -2115,7 +2312,7 @@ def log_excel_instructions(logger: logging.Logger, n_returns: int, n_tickers: in
     logger.info("  ║   │  │  $C$10:$C$40 >= 0 (no short selling)                    │ [Delete]       │         ║")
     logger.info("  ║   │  └─────────────────────────────────────────────────────────┘                │         ║")
     logger.info("  ║   │                                                                             │         ║")
-    logger.info("  ║   │  ☐ Make Unconstrained Variables Non-Negative  ← DON'T USE THIS!             │         ║")
+    logger.info("  ║   │  [ ] Make Unconstrained Variables Non-Negative  ← DON'T USE THIS!             │         ║")
     logger.info("  ║   │                                                                             │         ║")
     logger.info("  ║   │  Select Solving Method:  [GRG Nonlinear     ▼]                              │         ║")
     logger.info("  ║   │                                                                             │         ║")
@@ -2141,7 +2338,7 @@ def log_excel_instructions(logger: logging.Logger, n_returns: int, n_tickers: in
     logger.info("  ├─────────────────────────────────────────────────────────────────────────────────┤")
     logger.info("  │  4. NO SHORT SELLING (Pension Fund)                                             │")
     logger.info("  │     • Add constraint: weights >= 0                                              │")
-    logger.info("  │     ⚠️  DON'T use 'Make Non-Negative' checkbox!                                  │")
+    logger.info("  │     WARNING:  DON'T use 'Make Non-Negative' checkbox!                                  │")
     logger.info("  └─────────────────────────────────────────────────────────────────────────────────┘")
     logger.info("")
 
