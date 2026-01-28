@@ -1272,6 +1272,13 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info(f"    D103 = D3 - D$64 = {returns_only[t3].values[0]:.4f} - {means[t3]:.4f} = {d3[0]:.4f}")
         logger.info("")
 
+        # Create full demeaned matrix DataFrame and log it
+        demeaned_matrix = returns_only.copy()
+        for ticker in tickers:
+            demeaned_matrix[ticker] = returns_only[ticker] - means[ticker]
+        log_dataframe(logger, demeaned_matrix, "FULL DEMEANED MATRIX (R - μ) - ALL VALUES",
+                      decimals=4, start_row=103, start_col=1)
+
         logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
         logger.info("  ┃  STEP 2: Transpose the Demeaned Matrix                                                              ┃")
         logger.info("  ┃          Convert rows to columns: (R-μ)ᵀ                                                            ┃")
@@ -1301,6 +1308,11 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info(f"  │ Row{n_obs}  {d1[-1]:>7.2f} {d2[-1]:>7.2f} {d3[-1]:>7.2f}  ...  │         │    ...     ...      ...      ...      ...    ...      ...   │")
         logger.info(f"  └────────────────────────────────────────┘         └─────────────────────────────────────────────────────────────────────────┘")
         logger.info("")
+
+        # Log full transposed demeaned matrix
+        transposed_demeaned = demeaned_matrix.T
+        log_dataframe(logger, transposed_demeaned, "FULL TRANSPOSED DEMEANED MATRIX (R - μ)ᵀ - ALL VALUES",
+                      decimals=4, start_row=1, start_col=1, show_excel_refs=False)
 
         logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
         logger.info("  ┃  STEP 3: Matrix Multiplication (R-μ)ᵀ × (R-μ)                                                       ┃")
@@ -1394,6 +1406,18 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info("  ┃  STEP 5: Final Covariance Matrix (Σ)                                                                ┃")
         logger.info("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
         logger.info("")
+
+        # Compute and log the raw MMULT result (sum of products, before dividing by N)
+        # This is (R-μ)ᵀ × (R-μ) in percentage form
+        mmult_raw = demeaned_matrix.T.dot(demeaned_matrix)
+        log_dataframe(logger, mmult_raw, "RAW MMULT RESULT: (R-μ)ᵀ × (R-μ) - Sum of Products (in %²)",
+                      decimals=4, start_row=1, start_col=1, show_excel_refs=False)
+
+        # Compute and log the covariance in percentage form (divide by N)
+        cov_pct_form = mmult_raw / n_obs
+        log_dataframe(logger, cov_pct_form, "COVARIANCE MATRIX (% form): MMULT / N - Population Covariance (in %²)",
+                      decimals=6, start_row=1, start_col=1, show_excel_refs=False)
+
         cov_spy_spy = cov_matrix.loc[t1, t1]
         cov_spy_aapl = cov_matrix.loc[t1, t2]
         cov_spy_amgn = cov_matrix.loc[t1, t3]
