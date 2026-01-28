@@ -301,8 +301,15 @@ def compute_ln_returns(prices_df: pd.DataFrame, date_col: str) -> pd.DataFrame:
 
     LN Return = ln(P_t / P_{t-1}) * 100 (as percentage)
 
+    For data sorted NEWEST FIRST (most recent date at top):
+        Return for date t = ln(Price_t / Price_{t-1})
+        = ln(current_row / next_row) since older dates are below
+
+    Example: If row 0 = June 2024, row 1 = May 2024
+        June return = ln(June price / May price) = ln(row 0 / row 1)
+
     Args:
-        prices_df: DataFrame with price data
+        prices_df: DataFrame with price data (sorted newest first)
         date_col: Name of the date column
 
     Returns:
@@ -319,16 +326,21 @@ def compute_ln_returns(prices_df: pd.DataFrame, date_col: str) -> pd.DataFrame:
     for col in prices.columns:
         prices[col] = pd.to_numeric(prices[col], errors='coerce')
 
-    # Compute log returns: ln(P_t / P_{t-1})
-    # This gives us one fewer row than prices
-    ln_returns = np.log(prices / prices.shift(1))
+    # Data is sorted NEWEST FIRST (June 2024 at row 0, older dates below)
+    # For the return at date t, we need: ln(Price_t / Price_{t-1})
+    # With newest first: Price_t is in current row, Price_{t-1} is in next row
+    # So we use: prices / prices.shift(-1)
+    #   Row 0 (June): June / May = correct June return
+    #   Row 1 (May): May / April = correct May return
+    #   Last row: oldest / NaN = NaN (drop this)
+    ln_returns = np.log(prices / prices.shift(-1))
 
     # Convert to percentage
     ln_returns = ln_returns * 100
 
-    # Drop the first row (NaN from shift)
-    ln_returns = ln_returns.iloc[1:].reset_index(drop=True)
-    dates = dates.iloc[1:].reset_index(drop=True)
+    # Drop the last row (NaN from shift(-1)) - this is the oldest date
+    ln_returns = ln_returns.iloc[:-1].reset_index(drop=True)
+    dates = dates.iloc[:-1].reset_index(drop=True)
 
     # Combine date with returns
     result = pd.DataFrame({date_col: dates})
