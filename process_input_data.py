@@ -789,12 +789,14 @@ def create_summary_sheet(wb: Workbook, prices_df: pd.DataFrame, ln_returns: pd.D
         cell.border = thin_border
     current_row += 1
 
-    # Variance row
+    # Variance row (decimal form: (std_pct / 100)^2)
     ws.cell(row=current_row, column=1, value="Variance").font = header_font
     ws.cell(row=current_row, column=1).border = thin_border
     for j, ticker in enumerate(tickers):
-        cell = ws.cell(row=current_row, column=j+2, value=stds[ticker]**2)
-        cell.number_format = '0.0000000'
+        # Convert std from percentage to decimal, then square for variance
+        variance_decimal = (stds[ticker] / 100) ** 2
+        cell = ws.cell(row=current_row, column=j+2, value=variance_decimal)
+        cell.number_format = '0.000000'
         cell.border = thin_border
 
     current_row += 3
@@ -1006,6 +1008,15 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         # Compute LN returns (auto-detects and ensures newest-first sorting)
         ln_returns = compute_ln_returns(prices_df, date_col, logger)
         logger.info(f"  Computed {len(ln_returns)} LN return observations")
+
+        # Filter to 5 years of data through June 2024 (as per exam instructions)
+        # 5 years = 60 monthly returns: July 2019 - June 2024
+        ln_returns[date_col] = pd.to_datetime(ln_returns[date_col])
+        start_date = pd.Timestamp('2019-07-01')  # July 2019 (5 years before June 2024)
+        end_date = pd.Timestamp('2024-06-30')
+        ln_returns = ln_returns[(ln_returns[date_col] >= start_date) & (ln_returns[date_col] <= end_date)]
+        ln_returns = ln_returns.reset_index(drop=True)
+        logger.info(f"  Filtered to 5 years (Jul 2019 - Jun 2024): {len(ln_returns)} returns")
 
         # =====================================================================
         # LOG ALL LN RETURNS
