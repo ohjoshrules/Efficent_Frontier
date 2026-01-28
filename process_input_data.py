@@ -1010,13 +1010,13 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         logger.info(f"  Computed {len(ln_returns)} LN return observations")
 
         # Filter to 5 years of data through June 2024 (as per exam instructions)
-        # 5 years = 60 monthly returns: July 2019 - June 2024
+        # June 2019 - June 2024 as specified in PDF
         ln_returns[date_col] = pd.to_datetime(ln_returns[date_col])
-        start_date = pd.Timestamp('2019-07-01')  # July 2019 (5 years before June 2024)
-        end_date = pd.Timestamp('2024-06-30')
+        start_date = pd.Timestamp('2019-06-01')  # June 2019
+        end_date = pd.Timestamp('2024-06-30')    # June 2024
         ln_returns = ln_returns[(ln_returns[date_col] >= start_date) & (ln_returns[date_col] <= end_date)]
         ln_returns = ln_returns.reset_index(drop=True)
-        logger.info(f"  Filtered to 5 years (Jul 2019 - Jun 2024): {len(ln_returns)} returns")
+        logger.info(f"  Filtered to 5 years (Jun 2019 - Jun 2024): {len(ln_returns)} returns")
 
         # =====================================================================
         # LOG ALL LN RETURNS
