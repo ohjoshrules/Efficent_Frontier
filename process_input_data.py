@@ -852,27 +852,68 @@ def create_summary_sheet(wb: Workbook, prices_df: pd.DataFrame, ln_returns: pd.D
         ws.column_dimensions[get_column_letter(j+2)].width = 14
 
 
-def log_dataframe(logger: logging.Logger, df: pd.DataFrame, title: str, decimals: int = 7):
+def get_excel_col_letter(col_idx: int) -> str:
+    """Convert 0-based column index to Excel column letter (A, B, ..., Z, AA, AB, ...)."""
+    result = ""
+    while col_idx >= 0:
+        result = chr(col_idx % 26 + ord('A')) + result
+        col_idx = col_idx // 26 - 1
+    return result
+
+
+def log_dataframe(logger: logging.Logger, df: pd.DataFrame, title: str, decimals: int = 7,
+                  start_row: int = 3, start_col: int = 1, show_excel_refs: bool = True):
     """
-    Log a DataFrame with all rows and columns visible.
+    Log a DataFrame with all rows and columns visible, with Excel-style row/column references.
 
     Args:
         logger: Logger instance
         df: DataFrame to log
         title: Title for the section
         decimals: Number of decimal places
+        start_row: Excel row number where data starts (default 3 for typical layout)
+        start_col: Excel column index where data starts, 0=A, 1=B (default 1 for B)
+        show_excel_refs: Whether to show Excel row/column references
     """
     logger.info("")
     logger.info("=" * 100)
     logger.info(f"  {title}")
     logger.info("=" * 100)
 
+    if show_excel_refs:
+        # Show column mapping
+        col_letters = []
+        logger.info("")
+        logger.info("  Excel Column Reference:")
+        col_info = "    "
+        for i, col in enumerate(df.columns):
+            col_letter = get_excel_col_letter(start_col + i)
+            col_letters.append(col_letter)
+            col_info += f"{col_letter}={col}  "
+            if (i + 1) % 8 == 0:  # Line break every 8 columns
+                logger.info(col_info)
+                col_info = "    "
+        if col_info.strip():
+            logger.info(col_info)
+        logger.info("")
+        logger.info(f"  Data starts at row {start_row} in Excel (Row 1 = headers, Row 2 = column names)")
+        logger.info("")
+
     # Set pandas display options for full output
     with pd.option_context('display.max_rows', None,
                            'display.max_columns', None,
                            'display.width', None,
                            'display.float_format', f'{{:.{decimals}f}}'.format):
-        df_str = df.to_string()
+
+        if show_excel_refs:
+            # Add Excel row numbers to the output
+            df_copy = df.copy()
+            excel_rows = [f"Row {start_row + i}" for i in range(len(df))]
+            df_copy.insert(0, 'Excel Row', excel_rows)
+            df_str = df_copy.to_string(index=True)
+        else:
+            df_str = df.to_string()
+
         for line in df_str.split('\n'):
             logger.info(line)
 
@@ -941,7 +982,8 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         # =====================================================================
         # LOG ALL PRICE DATA
         # =====================================================================
-        log_dataframe(logger, prices_df, f"PRICE DATA FROM '{source_sheet}' SHEET - ALL {len(prices_df)} ROWS")
+        log_dataframe(logger, prices_df, f"PRICE DATA FROM '{source_sheet}' SHEET - ALL {len(prices_df)} ROWS",
+                      start_row=3, start_col=0)  # A=Date, B=first ticker
 
         # Compute LN returns (auto-detects and ensures newest-first sorting)
         ln_returns = compute_ln_returns(prices_df, date_col, logger)
@@ -950,12 +992,14 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         # =====================================================================
         # LOG ALL LN RETURNS
         # =====================================================================
-        log_dataframe(logger, ln_returns, f"LN RETURNS (%) - ALL {len(ln_returns)} ROWS")
+        log_dataframe(logger, ln_returns, f"LN RETURNS (%) - ALL {len(ln_returns)} ROWS",
+                      start_row=3, start_col=0)  # A=Date, B=first ticker
 
         # Compute statistics
         returns_only = ln_returns[tickers]
         means = returns_only.mean()
         stds = returns_only.std(ddof=0)  # Population std dev
+        n_obs = len(returns_only)
 
         # Create stats DataFrame
         stats_df = pd.DataFrame({
@@ -965,25 +1009,305 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         }).set_index('Ticker')
 
         # =====================================================================
-        # LOG MEAN AND STD DEV
+        # LOG MEAN AND STD DEV WITH EXCEL INSTRUCTIONS
         # =====================================================================
-        log_dataframe(logger, stats_df.T, "STATISTICS: MEAN AND STANDARD DEVIATION")
+        logger.info("")
+        logger.info("=" * 100)
+        logger.info("  STATISTICS: MEAN AND STANDARD DEVIATION")
+        logger.info("=" * 100)
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  MATHEMATICAL FORMULAS:                                                         │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  MEAN (μ):     μ = (1/N) × Σᵢ rᵢ  =  Σᵢ rᵢ / N                                 │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  STD DEV (σ):  σ = √[ (1/N) × Σᵢ (rᵢ - μ)² ]                                   │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  VARIABLE DEFINITIONS:                                                          │")
+        logger.info(f"  │    N  = Number of observations = {n_obs}                                         │")
+        logger.info("  │    rᵢ = Return for observation i (each monthly LN return)                       │")
+        logger.info("  │    μ  = Mean (average) return = Greek letter 'mu'                               │")
+        logger.info("  │    σ  = Standard deviation (volatility) = Greek letter 'sigma'                  │")
+        logger.info("  │    Σᵢ = Summation over all i from 1 to N = Greek letter 'Sigma'                 │")
+        logger.info("  │    √  = Square root                                                             │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+        # Get sample cell values for examples
+        sample_ticker = tickers[0]  # First ticker (e.g., SPY)
+        first_return = returns_only[sample_ticker].iloc[0]  # B3 value
+        last_return = returns_only[sample_ticker].iloc[-1]  # Last row value
+
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  EXCEL FORMULAS (with cell values):                                             │")
+        logger.info("  │                                                                                 │")
+        logger.info(f"  │  Cell B3 = {first_return:.7f} (first {sample_ticker} return, June 2024)                   │")
+        logger.info(f"  │  Cell B{n_obs + 2} = {last_return:.7f} (last {sample_ticker} return)                            │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  MEAN (Average):                                                                │")
+        logger.info(f"  │    =AVERAGE(B3:B{n_obs + 2})                                                     │")
+        logger.info(f"  │    Result for {sample_ticker}: {means[sample_ticker]:.7f}%                                     │")
+        logger.info("  │    Drag across all ticker columns                                               │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  STANDARD DEVIATION (Population - divides by N):                                │")
+        logger.info(f"  │    =STDEV.P(B3:B{n_obs + 2})                                                     │")
+        logger.info(f"  │    Result for {sample_ticker}: {stds[sample_ticker]:.7f}%                                      │")
+        logger.info("  │    Drag across all ticker columns                                               │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  NOTE: Use STDEV.P (population), NOT STDEV.S (sample)                           │")
+        logger.info("  │        STDEV.P divides by N, STDEV.S divides by (N-1)                           │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+
+        # Verify a sample calculation with actual values
+        manual_mean = returns_only[sample_ticker].sum() / n_obs
+        manual_std = np.sqrt(((returns_only[sample_ticker] - manual_mean) ** 2).sum() / n_obs)
+        logger.info(f"  ✓ VERIFICATION for {sample_ticker}:")
+        logger.info(f"    Sum of all {n_obs} returns: {returns_only[sample_ticker].sum():.7f}")
+        logger.info(f"    Manual Mean:  {returns_only[sample_ticker].sum():.7f} / {n_obs} = {manual_mean:.7f}%")
+        logger.info(f"    Computed Mean:                 {means[sample_ticker]:.7f}%")
+        logger.info(f"    Match: {np.isclose(manual_mean, means[sample_ticker])}")
+        logger.info(f"    Manual Std:   √(Σ(r-μ)² / N) = {manual_std:.7f}%")
+        logger.info(f"    Computed Std:                  {stds[sample_ticker]:.7f}%")
+        logger.info(f"    Match: {np.isclose(manual_std, stds[sample_ticker])}")
+        logger.info("")
+
+        log_dataframe(logger, stats_df.T, "STATISTICS TABLE")
 
         # Compute covariance matrix (population)
-        cov_matrix = returns_only.cov() * (len(returns_only) - 1) / len(returns_only)
+        cov_matrix = returns_only.cov() * (n_obs - 1) / n_obs
 
         # =====================================================================
-        # LOG COVARIANCE MATRIX
+        # LOG COVARIANCE MATRIX WITH EXCEL INSTRUCTIONS AND VERIFICATION
         # =====================================================================
-        log_dataframe(logger, cov_matrix, f"COVARIANCE MATRIX ({len(tickers)}x{len(tickers)})")
+        logger.info("")
+        logger.info("=" * 100)
+        logger.info(f"  COVARIANCE MATRIX ({len(tickers)}x{len(tickers)})")
+        logger.info("=" * 100)
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  MATHEMATICAL FORMULA:                                                          │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │    Cov(X,Y) = (1/N) × Σᵢ [(Xᵢ - μₓ)(Yᵢ - μᵧ)]    (Population covariance)       │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  MATRIX FORM:                                                                   │")
+        logger.info("  │    Σ = (1/N) × (R - μ)ᵀ × (R - μ)                                               │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  VARIABLE DEFINITIONS:                                                          │")
+        logger.info(f"  │    N      = Number of observations = {n_obs}                                     │")
+        logger.info("  │    Xᵢ, Yᵢ = Return of asset X or Y at time i                                    │")
+        logger.info("  │    μₓ, μᵧ = Mean return of asset X or Y (mu_x, mu_y)                            │")
+        logger.info("  │    Σ      = Covariance matrix (capital Sigma)                                   │")
+        logger.info("  │    R      = Matrix of returns (N rows × k assets)                               │")
+        logger.info("  │    μ      = Row vector of mean returns                                          │")
+        logger.info("  │    (R-μ)  = Demeaned returns matrix (subtract mean from each column)            │")
+        logger.info("  │    ᵀ      = Transpose operator (rows become columns)                            │")
+        logger.info("  │    Cov(X,X) = Var(X) = σₓ²  (diagonal elements = variance)                      │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  EXCEL METHOD 1: Data Analysis ToolPak                                          │")
+        logger.info("  │    1. Data tab → Data Analysis → Covariance                                     │")
+        logger.info(f"  │    2. Input Range: B3:AF{n_obs + 2} (returns data)                               │")
+        logger.info("  │    3. Check 'Labels in first row'                                               │")
+        logger.info("  │    4. Output Range: Select destination                                          │")
+        logger.info("  │    ⚠️  NOTE: Data Analysis uses N-1 (sample covariance)                          │")
+        logger.info(f"  │    To convert to population: multiply by (N-1)/N = {n_obs - 1}/{n_obs} = {(n_obs-1)/n_obs:.7f}    │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+        # Get sample values for examples
+        t1, t2, t3 = tickers[0], tickers[1], tickers[2]  # e.g., SPY, AAPL, AMGN
+        r1 = returns_only[t1].values
+        r2 = returns_only[t2].values
+        m1, m2, m3 = means[t1], means[t2], means[tickers[2]]
+        first_r1, first_r2 = r1[0], r2[0]  # First returns (B3, C3)
+        first_demeaned_r1 = first_r1 - m1  # B103 value
+        first_demeaned_r2 = first_r2 - m2  # C103 value
+
+        logger.info("")
+        logger.info("  ╔═════════════════════════════════════════════════════════════════════════════════╗")
+        logger.info("  ║              EXCEL METHOD 2: MMULT (Matrix Multiplication)                      ║")
+        logger.info("  ║                  Recommended - gives population covariance directly             ║")
+        logger.info("  ╚═════════════════════════════════════════════════════════════════════════════════╝")
+        logger.info("")
+        logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        logger.info("  ┃  STEP 1: Create Demeaned Returns Matrix (R - μ)                                 ┃")
+        logger.info("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        logger.info("")
+        logger.info("  Original Returns Matrix (R):                     Demeaned Returns (R - μ):")
+        logger.info("  ┌─────────────────────────────────┐              ┌─────────────────────────────────┐")
+        logger.info(f"  │         {t1:>6}  {t2:>6}  {t3:>6}  │              │         {t1:>6}  {t2:>6}  {t3:>6}  │")
+        logger.info("  │ Row 3   ───────────────────── │              │ Row 103 ───────────────────── │")
+        logger.info(f"  │ B3={r1[0]:>7.2f}  C3={r2[0]:>7.2f}  ...  │    ─►      │ B103={r1[0]-m1:>7.2f} C103={r2[0]-m2:>7.2f} ... │")
+        logger.info(f"  │ B4={r1[1]:>7.2f}  C4={r2[1]:>7.2f}  ...  │    ─►      │ B104={r1[1]-m1:>7.2f} C104={r2[1]-m2:>7.2f} ... │")
+        logger.info(f"  │ B5={r1[2]:>7.2f}  C5={r2[2]:>7.2f}  ...  │    ─►      │ B105={r1[2]-m1:>7.2f} C105={r2[2]-m2:>7.2f} ... │")
+        logger.info("  │   ...       ...       ...      │              │   ...       ...       ...      │")
+        logger.info("  └─────────────────────────────────┘              └─────────────────────────────────┘")
+        logger.info("")
+        logger.info(f"  Formula in B103: =B3 - B$64    where B$64 = {m1:.4f} (mean of {t1})")
+        logger.info(f"  Example: B103 = {first_r1:.4f} - {m1:.4f} = {first_demeaned_r1:.4f}")
+        logger.info("")
+        logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        logger.info("  ┃  STEP 2: Matrix Multiplication for Covariance                                   ┃")
+        logger.info("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        logger.info("")
+        logger.info("  Formula: Σ = (1/N) × (R-μ)ᵀ × (R-μ)")
+        logger.info("")
+        logger.info("           ┌                           ┐ᵀ     ┌                           ┐")
+        logger.info(f"           │ {r1[0]-m1:>7.2f}  {r2[0]-m2:>7.2f}  ...   │      │ {r1[0]-m1:>7.2f}  {r2[0]-m2:>7.2f}  ...   │")
+        logger.info(f"           │ {r1[1]-m1:>7.2f}  {r2[1]-m2:>7.2f}  ...   │      │ {r1[1]-m1:>7.2f}  {r2[1]-m2:>7.2f}  ...   │")
+        logger.info(f"    1/{n_obs}  ×  │ {r1[2]-m1:>7.2f}  {r2[2]-m2:>7.2f}  ...   │   ×  │ {r1[2]-m1:>7.2f}  {r2[2]-m2:>7.2f}  ...   │")
+        logger.info(f"           │   ...      ...     ...   │      │   ...      ...     ...   │")
+        logger.info(f"           │ {r1[-1]-m1:>7.2f}  {r2[-1]-m2:>7.2f}  ...   │      │ {r1[-1]-m1:>7.2f}  {r2[-1]-m2:>7.2f}  ...   │")
+        logger.info("           └                           ┘      └                           ┘")
+        logger.info(f"             ({n_obs} × {len(tickers)})                        ({n_obs} × {len(tickers)})")
+        logger.info("")
+        logger.info("  After transpose:")
+        logger.info("")
+        logger.info(f"           ┌                                             ┐     ┌                           ┐")
+        logger.info(f"           │ {r1[0]-m1:>7.2f}  {r1[1]-m1:>7.2f}  {r1[2]-m1:>7.2f} ... {r1[-1]-m1:>7.2f} │     │ {r1[0]-m1:>7.2f}  {r2[0]-m2:>7.2f}  ...   │")
+        logger.info(f"    1/{n_obs}  ×  │ {r2[0]-m2:>7.2f}  {r2[1]-m2:>7.2f}  {r2[2]-m2:>7.2f} ... {r2[-1]-m2:>7.2f} │  ×  │ {r1[1]-m1:>7.2f}  {r2[1]-m2:>7.2f}  ...   │")
+        logger.info(f"           │   ...      ...      ...  ...    ...   │     │   ...      ...     ...   │")
+        logger.info(f"           └                                             ┘     └                           ┘")
+        logger.info(f"                       ({len(tickers)} × {n_obs})                              ({n_obs} × {len(tickers)})")
+        logger.info("")
+        logger.info("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        logger.info("  ┃  STEP 3: Result - Covariance Matrix                                             ┃")
+        logger.info("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        logger.info("")
+        cov_spy_spy = cov_matrix.loc[t1, t1]
+        cov_spy_aapl = cov_matrix.loc[t1, t2]
+        cov_aapl_aapl = cov_matrix.loc[t2, t2]
+        logger.info("           ┌                                                   ┐")
+        logger.info(f"           │  Cov({t1},{t1})   Cov({t1},{t2})   Cov({t1},{t3})  ...  │")
+        logger.info(f"    Σ  =   │  Cov({t2},{t1})   Cov({t2},{t2})   Cov({t2},{t3})  ...  │")
+        logger.info(f"           │  Cov({t3},{t1})   Cov({t3},{t2})   Cov({t3},{t3})  ...  │")
+        logger.info("           │      ...          ...          ...      ...  │")
+        logger.info("           └                                                   ┘")
+        logger.info("")
+        logger.info(f"           ┌                                                   ┐")
+        logger.info(f"           │  {cov_spy_spy:>10.4f}   {cov_spy_aapl:>10.4f}   ...            │")
+        logger.info(f"    Σ  =   │  {cov_spy_aapl:>10.4f}   {cov_aapl_aapl:>10.4f}   ...            │")
+        logger.info(f"           │      ...          ...          ...            │")
+        logger.info(f"           └                                                   ┘")
+        logger.info("")
+        logger.info(f"  Excel Formula: =MMULT(TRANSPOSE(B103:AF{102 + n_obs}), B103:AF{102 + n_obs}) / {n_obs}")
+        logger.info("  Press Ctrl+Shift+Enter (or just Enter in Excel 365)")
+        logger.info("")
+        logger.info("  ╔═════════════════════════════════════════════════════════════════════════════════╗")
+        logger.info("  ║                           VERIFICATION                                          ║")
+        logger.info("  ╚═════════════════════════════════════════════════════════════════════════════════╝")
+        logger.info("")
+
+        # Verify covariance calculation manually
+        manual_cov = np.sum((r1 - m1) * (r2 - m2)) / n_obs
+        computed_cov = cov_matrix.loc[t1, t2]
+
+        logger.info(f"  ✓ VERIFICATION - Covariance({t1}, {t2}):")
+        logger.info(f"    Formula: Σ[(r_{t1} - μ_{t1})(r_{t2} - μ_{t2})] / N")
+        logger.info(f"    ")
+        logger.info(f"    ┌───────────────────────────────────────────────────────────────────────┐")
+        logger.info(f"    │  Step-by-step calculation for first observation:                     │")
+        logger.info(f"    ├───────────────────────────────────────────────────────────────────────┤")
+        logger.info(f"    │  {t1} return (B3):    {first_r1:>12.7f}                                │")
+        logger.info(f"    │  {t1} mean (B64):     {m1:>12.7f}                                │")
+        logger.info(f"    │  {t1} demeaned:       {first_r1:>12.7f} - {m1:.7f} = {first_demeaned_r1:>12.7f}  │")
+        logger.info(f"    │                                                                       │")
+        logger.info(f"    │  {t2} return (C3):   {first_r2:>12.7f}                                │")
+        logger.info(f"    │  {t2} mean (C64):    {m2:>12.7f}                                │")
+        logger.info(f"    │  {t2} demeaned:      {first_r2:>12.7f} - {m2:.7f} = {first_demeaned_r2:>12.7f}  │")
+        logger.info(f"    │                                                                       │")
+        logger.info(f"    │  Product: {first_demeaned_r1:.7f} × {first_demeaned_r2:.7f} = {first_demeaned_r1 * first_demeaned_r2:>12.7f}       │")
+        logger.info(f"    └───────────────────────────────────────────────────────────────────────┘")
+        logger.info(f"    ")
+        logger.info(f"    Sum of all {n_obs} products: {np.sum((r1 - m1) * (r2 - m2)):.7f}")
+        logger.info(f"    Divide by N: {np.sum((r1 - m1) * (r2 - m2)):.7f} / {n_obs} = {manual_cov:.7f}")
+        logger.info(f"    Matrix value:        {computed_cov:.7f}")
+        logger.info(f"    Match: {np.isclose(manual_cov, computed_cov)}")
+        logger.info("")
+
+        # Verify variance (diagonal) = std^2
+        manual_var = stds[t1] ** 2
+        matrix_var = cov_matrix.loc[t1, t1]
+        logger.info(f"  ✓ VERIFICATION - Variance({t1}) = Std²:")
+        logger.info(f"    Std({t1})² = {stds[t1]:.7f}² = {manual_var:.7f}")
+        logger.info(f"    Cov({t1},{t1}) from matrix:    {matrix_var:.7f}")
+        logger.info(f"    Match: {np.isclose(manual_var, matrix_var)}")
+        logger.info("")
+
+        # Log covariance matrix with Excel references
+        log_dataframe(logger, cov_matrix, "COVARIANCE MATRIX VALUES", start_row=180, start_col=1)
 
         # Compute correlation matrix
         corr_matrix = returns_only.corr()
 
         # =====================================================================
-        # LOG CORRELATION MATRIX
+        # LOG CORRELATION MATRIX WITH EXCEL INSTRUCTIONS AND VERIFICATION
         # =====================================================================
-        log_dataframe(logger, corr_matrix, f"CORRELATION MATRIX ({len(tickers)}x{len(tickers)})")
+        logger.info("")
+        logger.info("=" * 100)
+        logger.info(f"  CORRELATION MATRIX ({len(tickers)}x{len(tickers)})")
+        logger.info("=" * 100)
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  MATHEMATICAL FORMULA:                                                          │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │    ρₓᵧ = Cov(X,Y) / (σₓ × σᵧ)                                                   │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │    Or equivalently:                                                             │")
+        logger.info("  │    ρₓᵧ = Σᵢ[(Xᵢ - μₓ)(Yᵢ - μᵧ)] / √[Σᵢ(Xᵢ - μₓ)² × Σᵢ(Yᵢ - μᵧ)²]             │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  VARIABLE DEFINITIONS:                                                          │")
+        logger.info("  │    ρₓᵧ     = Correlation coefficient between X and Y (Greek letter 'rho')       │")
+        logger.info("  │    Cov(X,Y) = Covariance between X and Y                                        │")
+        logger.info("  │    σₓ, σᵧ  = Standard deviation of X and Y (sigma_x, sigma_y)                   │")
+        logger.info("  │    Xᵢ, Yᵢ  = Return of asset X or Y at time i                                   │")
+        logger.info("  │    μₓ, μᵧ  = Mean return of asset X or Y                                        │")
+        logger.info("  │    Σᵢ      = Summation over all observations i                                  │")
+        logger.info("  │    √       = Square root                                                        │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  PROPERTIES:                                                                    │")
+        logger.info("  │    • ρₓₓ = 1.0 (diagonal = perfect correlation with itself)                     │")
+        logger.info("  │    • -1 ≤ ρ ≤ +1 (bounded between -1 and 1)                                     │")
+        logger.info("  │    • ρₓᵧ = ρᵧₓ (symmetric matrix)                                               │")
+        logger.info("  │    • ρ = +1: perfect positive correlation                                       │")
+        logger.info("  │    • ρ = -1: perfect negative correlation                                       │")
+        logger.info("  │    • ρ = 0: no linear correlation                                               │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+        logger.info("  ┌─────────────────────────────────────────────────────────────────────────────────┐")
+        logger.info("  │  EXCEL FORMULAS:                                                                │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  Method 1: Direct correlation function                                          │")
+        logger.info("  │    =CORREL(ticker1_returns, ticker2_returns)                                    │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  Method 2: Using Covariance Matrix                                              │")
+        logger.info("  │    =Cov(i,j) / SQRT(Cov(i,i) × Cov(j,j))                                        │")
+        logger.info("  │    Or: =Cov(i,j) / (StdDev_i × StdDev_j)                                        │")
+        logger.info("  │                                                                                 │")
+        logger.info("  │  Method 3: Data Analysis ToolPak                                                │")
+        logger.info("  │    Data tab → Data Analysis → Correlation                                       │")
+        logger.info("  └─────────────────────────────────────────────────────────────────────────────────┘")
+        logger.info("")
+
+        # Verify correlation calculation
+        manual_corr = manual_cov / (stds[t1] * stds[t2])
+        computed_corr = corr_matrix.loc[t1, t2]
+
+        logger.info(f"  ✓ VERIFICATION - Correlation({t1}, {t2}):")
+        logger.info(f"    Formula: Cov({t1},{t2}) / (σ_{t1} × σ_{t2})")
+        logger.info(f"    = {manual_cov:.7f} / ({stds[t1]:.7f} × {stds[t2]:.7f})")
+        logger.info(f"    = {manual_cov:.7f} / {stds[t1] * stds[t2]:.7f}")
+        logger.info(f"    Manual calculation: {manual_corr:.7f}")
+        logger.info(f"    Matrix value:       {computed_corr:.7f}")
+        logger.info(f"    Match: {np.isclose(manual_corr, computed_corr)}")
+        logger.info("")
+
+        # Verify diagonal = 1
+        diag_check = all(np.isclose(corr_matrix.loc[t, t], 1.0) for t in tickers)
+        logger.info(f"  ✓ VERIFICATION - All diagonal elements = 1.0: {diag_check}")
+        logger.info("")
+
+        log_dataframe(logger, corr_matrix, "CORRELATION MATRIX VALUES")
 
         # Create the LN_Returns sheet with all data
         create_ln_returns_sheet(wb, ln_returns, date_col, means, stds, cov_matrix)
