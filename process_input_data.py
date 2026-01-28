@@ -21,6 +21,7 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Tuple
+from scipy.optimize import minimize
 
 # PDF reading support
 try:
@@ -58,8 +59,10 @@ PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Global variable to store processed file path
+# Global variables to store processed data
 PROCESSED_FILE_PATH = None
+STORED_COV_MATRIX = None
+STORED_MEANS = None
 
 
 # =============================================================================
@@ -518,31 +521,43 @@ def create_ln_returns_sheet(wb: Workbook, ln_returns: pd.DataFrame, date_col: st
     ws.cell(row=mean_row, column=1, value="Mean").font = header_font
     ws.cell(row=mean_row, column=1).border = thin_border
 
-    # Std Dev row
+    # Std Dev row (percentage form)
     std_row = mean_row + 1
-    ws.cell(row=std_row, column=1, value="Std Dev").font = header_font
+    ws.cell(row=std_row, column=1, value="Std Dev (%)").font = header_font
     ws.cell(row=std_row, column=1).border = thin_border
+
+    # Variance row (decimal form)
+    var_row = std_row + 1
+    ws.cell(row=var_row, column=1, value="Variance").font = header_font
+    ws.cell(row=var_row, column=1).border = thin_border
 
     # Compute and write stats
     returns_only = ln_returns[tickers]
     means = returns_only.mean()
     stds = returns_only.std(ddof=0)  # Population std dev
+    # Variance in decimal form: (std_pct / 100)^2
+    variances = (stds / 100) ** 2
 
     for j, ticker in enumerate(tickers):
-        # Mean
+        # Mean (percentage)
         mean_cell = ws.cell(row=mean_row, column=j+2, value=means[ticker])
         mean_cell.number_format = '0.0000'
         mean_cell.border = thin_border
 
-        # Std Dev
+        # Std Dev (percentage)
         std_cell = ws.cell(row=std_row, column=j+2, value=stds[ticker])
         std_cell.number_format = '0.0000'
         std_cell.border = thin_border
 
+        # Variance (decimal form)
+        var_cell = ws.cell(row=var_row, column=j+2, value=variances[ticker])
+        var_cell.number_format = '0.000000'
+        var_cell.border = thin_border
+
     # ==========================================================================
     # SECTION 3: Covariance Matrix
     # ==========================================================================
-    cov_header_row = std_row + 3
+    cov_header_row = var_row + 3
 
     ws.cell(row=cov_header_row, column=1, value="COVARIANCE MATRIX").font = section_font
 
@@ -1002,13 +1017,16 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         returns_only = ln_returns[tickers]
         means = returns_only.mean()
         stds = returns_only.std(ddof=0)  # Population std dev
+        # Variance in decimal form: (std_pct / 100)^2
+        variances = (stds / 100) ** 2
         n_obs = len(returns_only)
 
         # Create stats DataFrame
         stats_df = pd.DataFrame({
             'Ticker': tickers,
             'Mean (%)': means.values,
-            'Std Dev (%)': stds.values
+            'Std Dev (%)': stds.values,
+            'Variance': variances.values
         }).set_index('Ticker')
 
         # =====================================================================
@@ -1740,6 +1758,24 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         create_summary_sheet(wb, prices_df, ln_returns, date_col, tickers, means, stds, cov_matrix)
         logger.info(f"  Created Summary sheet")
 
+        # Auto-fit columns for all sheets
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            for column_cells in ws.columns:
+                max_length = 0
+                column_letter = column_cells[0].column_letter
+                for cell in column_cells:
+                    try:
+                        if cell.value:
+                            cell_length = len(str(cell.value))
+                            if cell_length > max_length:
+                                max_length = cell_length
+                    except:
+                        pass
+                # Add a little extra width for padding
+                adjusted_width = min(max_length + 2, 50)  # Cap at 50 to avoid very wide columns
+                ws.column_dimensions[column_letter].width = adjusted_width
+
         # Save to processed folder
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_name = f"{excel_file.stem}_processed_{timestamp}.xlsx"
@@ -1748,9 +1784,11 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         wb.save(output_path)
         logger.info(f"  Saved: {output_path}")
 
-        # Store output path for end of log
-        global PROCESSED_FILE_PATH
+        # Store output path and data for end of log
+        global PROCESSED_FILE_PATH, STORED_COV_MATRIX, STORED_MEANS
         PROCESSED_FILE_PATH = output_path
+        STORED_COV_MATRIX = cov_matrix
+        STORED_MEANS = means
 
         # Log detailed Excel instructions
         log_excel_instructions(logger, len(ln_returns), len(tickers), tickers,
@@ -2507,6 +2545,209 @@ def main():
 
                 logger.info("│" + " " * 98 + "│")
                 logger.info("└" + "─" * 98 + "┘")
+
+    # =========================================================================
+    # PYTHON COMPUTED SOLUTIONS
+    # =========================================================================
+    if STORED_COV_MATRIX is not None and STORED_MEANS is not None:
+        logger.info("")
+        logger.info("╔" + "═" * 98 + "╗")
+        logger.info("║" + " " * 28 + "PYTHON COMPUTED SOLUTIONS" + " " * 45 + "║")
+        logger.info("╠" + "═" * 98 + "╣")
+        logger.info("║" + " " * 98 + "║")
+        logger.info("║  These are the actual portfolio optimization results computed by Python using scipy.optimize." + " " * 5 + "║")
+        logger.info("║  Use these to verify your Excel Solver results.                                               " + " " * 2 + "║")
+        logger.info("║" + " " * 98 + "║")
+
+        cov_matrix = STORED_COV_MATRIX
+        means_pct = STORED_MEANS  # Means in percentage form
+        means_dec = means_pct / 100  # Convert to decimal
+        tickers = list(means_pct.index)
+        n_assets = len(tickers)
+        rf = 0.0003  # Risk-free rate = 0.03% per month (as decimal)
+
+        # Portfolio optimization functions
+        def portfolio_return(weights, means):
+            return np.sum(weights * means)
+
+        def portfolio_variance(weights, cov_matrix):
+            return np.dot(weights.T, np.dot(cov_matrix.values, weights))
+
+        def portfolio_std(weights, cov_matrix):
+            return np.sqrt(portfolio_variance(weights, cov_matrix))
+
+        def neg_sharpe_ratio(weights, means, cov_matrix, rf):
+            ret = portfolio_return(weights, means)
+            std = portfolio_std(weights, cov_matrix)
+            return -(ret - rf) / std if std > 0 else 0
+
+        # Constraints: weights sum to 1
+        constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
+
+        # Initial guess: equal weights
+        init_weights = np.array([1/n_assets] * n_assets)
+
+        # ---------------------------------------------------------------------
+        # 1. Equal-Weighted Portfolio
+        # ---------------------------------------------------------------------
+        ew_weights = np.array([1/n_assets] * n_assets)
+        ew_return = portfolio_return(ew_weights, means_dec.values)
+        ew_std = portfolio_std(ew_weights, cov_matrix)
+        ew_var = ew_std ** 2
+
+        logger.info("║" + "─" * 98 + "║")
+        logger.info("║  1. EQUAL-WEIGHTED PORTFOLIO (1/N for each stock)                                             " + " " * 2 + "║")
+        logger.info("║" + "─" * 98 + "║")
+        logger.info(f"║     Portfolio Return:   {ew_return*100:>12.6f}% per month                                            " + " " * 2 + "║")
+        logger.info(f"║     Portfolio Std Dev:  {ew_std*100:>12.6f}% per month                                            " + " " * 2 + "║")
+        logger.info(f"║     Portfolio Variance: {ew_var:>12.9f} (decimal form)                                       " + " " * 2 + "║")
+        logger.info("║" + " " * 98 + "║")
+
+        # ---------------------------------------------------------------------
+        # 2. Tangent Portfolio (Maximum Sharpe Ratio)
+        # ---------------------------------------------------------------------
+        try:
+            result = minimize(
+                neg_sharpe_ratio,
+                init_weights,
+                args=(means_dec.values, cov_matrix, rf),
+                method='SLSQP',
+                constraints=constraints
+            )
+            tan_weights = result.x
+            tan_return = portfolio_return(tan_weights, means_dec.values)
+            tan_std = portfolio_std(tan_weights, cov_matrix)
+            tan_var = tan_std ** 2
+            tan_sharpe = (tan_return - rf) / tan_std
+
+            logger.info("║" + "─" * 98 + "║")
+            logger.info("║  2. TANGENT PORTFOLIO (Maximum Sharpe Ratio, RF = 0.03%)                                      " + " " * 2 + "║")
+            logger.info("║" + "─" * 98 + "║")
+            logger.info(f"║     Portfolio Return:   {tan_return*100:>12.6f}% per month                                            " + " " * 2 + "║")
+            logger.info(f"║     Portfolio Std Dev:  {tan_std*100:>12.6f}% per month                                            " + " " * 2 + "║")
+            logger.info(f"║     Portfolio Variance: {tan_var:>12.9f} (decimal form)                                       " + " " * 2 + "║")
+            logger.info(f"║     Sharpe Ratio:       {tan_sharpe:>12.6f}                                                       " + " " * 2 + "║")
+            logger.info("║" + " " * 98 + "║")
+            logger.info("║     Top 5 Weights:                                                                            " + " " * 2 + "║")
+            sorted_idx = np.argsort(tan_weights)[::-1][:5]
+            for i in sorted_idx:
+                logger.info(f"║       {tickers[i]:>6}: {tan_weights[i]*100:>10.4f}%                                                              " + " " * 2 + "║")
+            logger.info("║" + " " * 98 + "║")
+        except Exception as e:
+            logger.info(f"║     Error computing tangent portfolio: {str(e)[:50]}" + " " * 40 + "║")
+
+        # ---------------------------------------------------------------------
+        # 3. Efficient Portfolios at Target Std Devs (Unconstrained)
+        # ---------------------------------------------------------------------
+        target_stds = [0.04, 0.05, 0.06, 0.07]  # 4%, 5%, 6%, 7% in decimal
+
+        logger.info("║" + "─" * 98 + "║")
+        logger.info("║  3. EFFICIENT PORTFOLIOS (Unconstrained - Max Return for Target Std Dev)                       " + " " * 2 + "║")
+        logger.info("║" + "─" * 98 + "║")
+
+        for target_std in target_stds:
+            try:
+                # Minimize negative return (maximize return) subject to std constraint
+                std_constraint = {'type': 'eq', 'fun': lambda w, ts=target_std: portfolio_std(w, cov_matrix) - ts}
+                result = minimize(
+                    lambda w: -portfolio_return(w, means_dec.values),
+                    init_weights,
+                    method='SLSQP',
+                    constraints=[constraints[0], std_constraint]
+                )
+                eff_weights = result.x
+                eff_return = portfolio_return(eff_weights, means_dec.values)
+                eff_std = portfolio_std(eff_weights, cov_matrix)
+                eff_var = eff_std ** 2
+
+                logger.info(f"║     Target Std = {target_std*100:.0f}%:  Return = {eff_return*100:>10.6f}%,  Actual Std = {eff_std*100:>10.6f}%,  Var = {eff_var:>12.9f}" + " " * 2 + "║")
+            except Exception as e:
+                logger.info(f"║     Target Std = {target_std*100:.0f}%:  Error - {str(e)[:60]}" + " " * 20 + "║")
+
+        logger.info("║" + " " * 98 + "║")
+
+        # ---------------------------------------------------------------------
+        # 4. Pension Fund Portfolios (Long-Only, No Short Selling)
+        # ---------------------------------------------------------------------
+        logger.info("║" + "─" * 98 + "║")
+        logger.info("║  4. PENSION FUND PORTFOLIOS (Long-Only: weights >= 0)                                          " + " " * 2 + "║")
+        logger.info("║" + "─" * 98 + "║")
+
+        bounds = [(0, 1) for _ in range(n_assets)]  # No short selling
+
+        for target_std in [0.05, 0.06]:  # 5% and 6%
+            try:
+                std_constraint = {'type': 'eq', 'fun': lambda w, ts=target_std: portfolio_std(w, cov_matrix) - ts}
+                result = minimize(
+                    lambda w: -portfolio_return(w, means_dec.values),
+                    init_weights,
+                    method='SLSQP',
+                    bounds=bounds,
+                    constraints=[constraints[0], std_constraint]
+                )
+                pf_weights = result.x
+                pf_return = portfolio_return(pf_weights, means_dec.values)
+                pf_std = portfolio_std(pf_weights, cov_matrix)
+                pf_var = pf_std ** 2
+
+                logger.info(f"║     Target Std = {target_std*100:.0f}%:  Return = {pf_return*100:>10.6f}%,  Actual Std = {pf_std*100:>10.6f}%,  Var = {pf_var:>12.9f}" + " " * 2 + "║")
+            except Exception as e:
+                logger.info(f"║     Target Std = {target_std*100:.0f}%:  Error - {str(e)[:60]}" + " " * 20 + "║")
+
+        logger.info("║" + " " * 98 + "║")
+
+        # ---------------------------------------------------------------------
+        # 5. Disavowel Investor (Excludes AAPL, AMGN, AXP, IBM, INTC)
+        # ---------------------------------------------------------------------
+        excluded = ['AAPL', 'AMGN', 'AXP', 'IBM', 'INTC']
+        included_idx = [i for i, t in enumerate(tickers) if t not in excluded]
+        included_tickers = [tickers[i] for i in included_idx]
+
+        logger.info("║" + "─" * 98 + "║")
+        logger.info("║  5. DISAVOWEL INVESTOR (Excludes: AAPL, AMGN, AXP, IBM, INTC)                                   " + " " * 2 + "║")
+        logger.info("║" + "─" * 98 + "║")
+
+        if len(included_idx) > 0:
+            # Create sub-covariance matrix and sub-means
+            sub_cov = cov_matrix.iloc[included_idx, included_idx]
+            sub_means = means_dec.iloc[included_idx]
+            n_sub = len(included_idx)
+            sub_init = np.array([1/n_sub] * n_sub)
+            sub_constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1}]
+
+            try:
+                target_std = 0.07
+                std_constraint = {'type': 'eq', 'fun': lambda w, ts=target_std: np.sqrt(np.dot(w.T, np.dot(sub_cov.values, w))) - ts}
+                result = minimize(
+                    lambda w: -np.sum(w * sub_means.values),
+                    sub_init,
+                    method='SLSQP',
+                    constraints=[sub_constraints[0], std_constraint]
+                )
+                dis_weights = result.x
+                dis_return = np.sum(dis_weights * sub_means.values)
+                dis_std = np.sqrt(np.dot(dis_weights.T, np.dot(sub_cov.values, dis_weights)))
+                dis_var = dis_std ** 2
+
+                logger.info(f"║     Target Std = 7%:   Return = {dis_return*100:>10.6f}%,  Actual Std = {dis_std*100:>10.6f}%,  Var = {dis_var:>12.9f}" + " " * 2 + "║")
+
+                # Compare with normal investor at 7%
+                std_constraint_normal = {'type': 'eq', 'fun': lambda w: portfolio_std(w, cov_matrix) - 0.07}
+                result_normal = minimize(
+                    lambda w: -portfolio_return(w, means_dec.values),
+                    init_weights,
+                    method='SLSQP',
+                    constraints=[constraints[0], std_constraint_normal]
+                )
+                normal_return = portfolio_return(result_normal.x, means_dec.values)
+                logger.info(f"║     Normal Investor at 7%: Return = {normal_return*100:>10.6f}%                                      " + " " * 2 + "║")
+                logger.info(f"║     Difference: {(dis_return - normal_return)*100:>10.6f}% (Disavowel is {'inefficient' if dis_return < normal_return else 'efficient'})" + " " * 26 + "║")
+            except Exception as e:
+                logger.info(f"║     Error: {str(e)[:70]}" + " " * 20 + "║")
+
+        logger.info("║" + " " * 98 + "║")
+        logger.info("╚" + "═" * 98 + "╝")
+        logger.info("")
 
     # =========================================================================
     # OUTPUT FILE LOCATION
