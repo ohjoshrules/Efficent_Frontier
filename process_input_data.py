@@ -295,26 +295,107 @@ def detect_date_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 
-def compute_ln_returns(prices_df: pd.DataFrame, date_col: str) -> pd.DataFrame:
+def detect_date_order(dates: pd.Series) -> str:
+    """
+    Detect if dates are sorted newest first or oldest first.
+
+    Args:
+        dates: Series of dates
+
+    Returns:
+        'newest_first' or 'oldest_first'
+
+    Raises:
+        ValueError: If dates are not sorted or cannot be determined
+    """
+    # Convert to datetime if not already
+    try:
+        dates = pd.to_datetime(dates)
+    except Exception as e:
+        raise ValueError(f"Could not parse dates: {e}")
+
+    # Check first and last valid dates
+    first_date = dates.iloc[0]
+    last_date = dates.iloc[-1]
+
+    if pd.isna(first_date) or pd.isna(last_date):
+        raise ValueError("First or last date is NaN - cannot determine order")
+
+    if first_date > last_date:
+        return 'newest_first'
+    elif first_date < last_date:
+        return 'oldest_first'
+    else:
+        raise ValueError("First and last dates are equal - cannot determine order")
+
+
+def ensure_newest_first(prices_df: pd.DataFrame, date_col: str, logger=None) -> pd.DataFrame:
+    """
+    Ensure data is sorted with newest dates first.
+
+    Args:
+        prices_df: DataFrame with price data
+        date_col: Name of the date column
+        logger: Optional logger for messages
+
+    Returns:
+        DataFrame sorted newest first
+    """
+    dates = prices_df[date_col]
+
+    try:
+        order = detect_date_order(dates)
+
+        if order == 'oldest_first':
+            if logger:
+                logger.warning("  ⚠️  Data is sorted OLDEST FIRST - reversing to NEWEST FIRST")
+            # Reverse the dataframe to make it newest first
+            prices_df = prices_df.iloc[::-1].reset_index(drop=True)
+            if logger:
+                logger.info(f"  Data reordered: {prices_df[date_col].iloc[0]} (newest) to {prices_df[date_col].iloc[-1]} (oldest)")
+        else:
+            if logger:
+                logger.info(f"  ✓ Data is correctly sorted NEWEST FIRST")
+                logger.info(f"    First date: {dates.iloc[0]} (newest)")
+                logger.info(f"    Last date:  {dates.iloc[-1]} (oldest)")
+
+    except ValueError as e:
+        if logger:
+            logger.error(f"  ⚠️  Could not determine date order: {e}")
+            logger.warning("  Assuming data is sorted correctly (newest first)")
+
+    return prices_df
+
+
+def compute_ln_returns(prices_df: pd.DataFrame, date_col: str, logger=None) -> pd.DataFrame:
     """
     Compute log returns from price data.
 
     LN Return = ln(P_t / P_{t-1}) * 100 (as percentage)
 
-    For data sorted NEWEST FIRST (most recent date at top):
-        Return for date t = ln(Price_t / Price_{t-1})
-        = ln(current_row / next_row) since older dates are below
+    This function automatically detects and handles both date orderings:
+    - NEWEST FIRST: Most recent date at row 0 (e.g., June 2024 at top)
+    - OLDEST FIRST: Oldest date at row 0 (e.g., June 2018 at top)
 
-    Example: If row 0 = June 2024, row 1 = May 2024
+    Data is always converted to NEWEST FIRST before calculation.
+
+    Example: For June 2024 return with June at row 0, May at row 1:
         June return = ln(June price / May price) = ln(row 0 / row 1)
 
     Args:
-        prices_df: DataFrame with price data (sorted newest first)
+        prices_df: DataFrame with price data (any date order - will be auto-detected)
         date_col: Name of the date column
+        logger: Optional logger for status messages
 
     Returns:
-        DataFrame with log returns
+        DataFrame with log returns (sorted newest first)
     """
+    # Make a copy to avoid modifying original
+    prices_df = prices_df.copy()
+
+    # Ensure data is sorted newest first
+    prices_df = ensure_newest_first(prices_df, date_col, logger)
+
     # Separate date and price columns
     dates = prices_df[date_col].copy()
 
@@ -326,7 +407,7 @@ def compute_ln_returns(prices_df: pd.DataFrame, date_col: str) -> pd.DataFrame:
     for col in prices.columns:
         prices[col] = pd.to_numeric(prices[col], errors='coerce')
 
-    # Data is sorted NEWEST FIRST (June 2024 at row 0, older dates below)
+    # Data is now guaranteed to be sorted NEWEST FIRST
     # For the return at date t, we need: ln(Price_t / Price_{t-1})
     # With newest first: Price_t is in current row, Price_{t-1} is in next row
     # So we use: prices / prices.shift(-1)
@@ -862,8 +943,8 @@ def process_single_excel(excel_file: Path, logger: logging.Logger):
         # =====================================================================
         log_dataframe(logger, prices_df, f"PRICE DATA FROM '{source_sheet}' SHEET - ALL {len(prices_df)} ROWS")
 
-        # Compute LN returns
-        ln_returns = compute_ln_returns(prices_df, date_col)
+        # Compute LN returns (auto-detects and ensures newest-first sorting)
+        ln_returns = compute_ln_returns(prices_df, date_col, logger)
         logger.info(f"  Computed {len(ln_returns)} LN return observations")
 
         # =====================================================================
