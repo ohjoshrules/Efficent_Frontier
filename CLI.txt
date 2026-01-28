@@ -1,0 +1,174 @@
+================================================================================
+                    EFFICIENT FRONTIER - CLI COMMANDS
+================================================================================
+
+This file documents all command-line interface (CLI) commands available in the
+Efficient Frontier portfolio optimization toolkit.
+
+================================================================================
+1. DATA PROCESSING SCRIPT
+================================================================================
+
+Command:
+    python process_input_data.py
+
+Description:
+    Processes input files from data/input/ folder:
+    - Reads PDFs from data/input/pdf/ and creates TODO.md
+    - Archives old TODOs with datetime stamps to data/archived/
+    - Reads Excel files from data/input/excel/
+    - Finds "Prices" sheet and computes LN returns
+    - Calculates Mean, Std Dev, and Covariance Matrix
+    - Creates processed Excel file in data/processed/
+
+Output:
+    - TODO.md (in project root)
+    - Processed Excel file: data/processed/[filename]_processed_[datetime].xlsx
+    - Log file: logs/process_input_[datetime].log
+
+Example:
+    python process_input_data.py
+
+================================================================================
+2. CLI ANALYSIS TOOL
+================================================================================
+
+Command:
+    python run_cli.py [OPTIONS]
+
+Description:
+    Modern Portfolio Theory Analysis Tool with command-line options.
+
+Options:
+    -h, --help              Show help message and exit
+    -f, --file FILE         Path to Excel file with portfolio data
+    -s, --sheet SHEET       Sheet name to read (default: Four)
+    -r, --rf-rate RF_RATE   Risk-free rate (default: 0.0005 = 0.05% monthly)
+    --no-short              Disable short selling (long-only constraint)
+    --no-plots              Disable plot generation
+    --show-plots            Show plots interactively (default: just save)
+
+Examples:
+    python run_cli.py
+        Run with sample data
+
+    python run_cli.py --file "data/input/excel/W4E1PrepData.xlsx"
+        Analyze specific Excel file
+
+    python run_cli.py --file "W3ClassData.xlsx" --sheet HW2
+        Analyze specific sheet in Excel file
+
+    python run_cli.py --no-short
+        Run optimization without short selling
+
+    python run_cli.py --rf-rate 0.0003 --show-plots
+        Use custom risk-free rate and show plots
+
+    python run_cli.py -f "data.xlsx" -s Prices -r 0.0005 --no-short --show-plots
+        Full example with all options
+
+================================================================================
+3. INTERACTIVE TOOL
+================================================================================
+
+Command:
+    python run_interactive.py
+
+Description:
+    Interactive Portfolio Optimization Analysis Tool with menu-driven interface.
+    Provides step-by-step configuration for:
+    - Risk-free rate selection (Treasury rates or custom)
+    - Data file selection
+    - Short-selling constraints
+    - Visualization options
+
+Features:
+    - Guided setup with default options
+    - Treasury rate options (2-Year, 5-Year, 10-Year)
+    - Interactive prompts for all parameters
+
+Example:
+    python run_interactive.py
+
+================================================================================
+4. EXAMPLE SCRIPTS
+================================================================================
+
+Homework 3 - Six Stocks Analysis:
+    python examples/example_hw3_six_stocks.py
+
+    Analyzes a portfolio of 6 stocks with efficient frontier calculation.
+
+Week 4 - Dow Jones Stocks Analysis:
+    python examples/example_week4_dj_stocks.py
+
+    Analyzes 30 Dow Jones Index stocks + S&P500.
+
+Homework Assistant:
+    python examples/homework_assistant.py
+
+    Interactive assistant for portfolio homework problems.
+
+================================================================================
+5. PACKAGE INSTALLATION
+================================================================================
+
+Install as editable package:
+    pip install -e .
+
+Install dependencies only:
+    pip install pandas numpy scipy matplotlib openpyxl PyMuPDF
+
+After installation, you can use:
+    ef-analyze              # Runs the CLI tool
+    ef-analyze --help       # Shows help
+
+================================================================================
+6. QUICK START
+================================================================================
+
+Step 1: Process input data
+    python process_input_data.py
+
+Step 2: Run analysis on processed data
+    python run_cli.py --file "data/processed/W4E1PrepData_processed_[datetime].xlsx" --sheet LN_Returns
+
+Step 3: View results
+    - Check output/ folder for plots
+    - Check logs/ folder for detailed logs
+
+================================================================================
+7. FILE LOCATIONS
+================================================================================
+
+Input Files:
+    data/input/excel/       Excel files to process
+    data/input/pdf/         PDF files to read for TODO
+
+Output Files:
+    data/processed/         Processed Excel files with calculations
+    data/archived/          Archived TODO files
+    logs/                   Processing logs
+    output/                 Generated plots and charts
+    TODO.md                 Current TODO list from PDFs
+
+================================================================================
+8. COMMON WORKFLOWS
+================================================================================
+
+Workflow A: Process new homework data
+    1. Place Excel file in data/input/excel/
+    2. Place PDF instructions in data/input/pdf/
+    3. Run: python process_input_data.py
+    4. Check TODO.md for tasks
+    5. Open processed Excel from data/processed/
+
+Workflow B: Run efficient frontier analysis
+    1. python run_cli.py --file "your_data.xlsx" --sheet "Prices"
+    2. View generated plots in output/
+
+Workflow C: Constrained optimization (no short selling)
+    1. python run_cli.py --file "your_data.xlsx" --no-short
+    2. Compare results with unconstrained version
+
+================================================================================
